@@ -116,6 +116,81 @@ network-view-osx/
    - Supports searching and filtering
    - Shows connection status indicator
 
+## Building
+
+### Quick Start
+
+Use the Makefile for common tasks:
+
+```bash
+# Build both backend and frontend
+make build
+
+# Build backend only
+make backend
+
+# Build frontend only
+make frontend
+
+# Run backend (development)
+make run
+
+# Start full dev mode (backend + frontend)
+make dev
+
+# Run tests
+make test
+
+# Clean build artifacts
+make clean
+
+# Show all targets
+make help
+```
+
+### Docker
+
+Build and run in a container:
+
+```bash
+# Build image
+docker build -t network-view-osx .
+
+# Run container
+docker run -p 8080:8080 network-view-osx
+```
+
+### Cross-Platform Binaries
+
+Build for all platforms (macOS, Linux, Windows) and architectures (amd64, arm64):
+
+```bash
+# Build with version tag
+./scripts/build.sh v1.0.0 dist
+
+# Or with default version
+./scripts/build.sh
+```
+
+This creates:
+- `network-view-osx-darwin-amd64` (macOS Intel)
+- `network-view-osx-darwin-arm64` (macOS Apple Silicon)
+- `network-view-osx-linux-amd64` (Linux x86_64)
+- `network-view-osx-linux-arm64` (Linux ARM64)
+- `network-view-osx-windows-amd64.exe` (Windows x86_64)
+- `network-view-osx-windows-arm64.exe` (Windows ARM64)
+
+### Automated Releases
+
+Push a version tag to create a GitHub release with all binaries:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This triggers the CI/CD pipeline to build and release all platform binaries automatically.
+
 ## Development
 
 ### Generate Proto Code
@@ -125,20 +200,6 @@ When updating `proto/mdns/v1/service.proto`:
 ```bash
 cd backend
 buf generate
-```
-
-### Build for Production
-
-**Frontend:**
-```bash
-cd frontend
-npm run build
-```
-
-**Backend:**
-```bash
-cd backend
-go build -o network-view-osx
 ```
 
 ## Testing

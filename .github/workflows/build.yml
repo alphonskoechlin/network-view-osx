@@ -1,0 +1,77 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    name: Build Binaries
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          ./scripts/build.sh "${{ steps.version.outputs.VERSION }}" dist
+      
+      - name: Create checksums
+        run: |
+          cd dist
+          sha256sum * > sha256sums.txt
+          cat sha256sums.txt
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/*
+          body: |
+            # Release ${{ steps.version.outputs.VERSION }}
+            
+            ## Downloads
+            
+            Platform binaries are available below. Extract and run:
+            
+            ```bash
+            # macOS (Intel)
+            ./network-view-osx-darwin-amd64
+            
+            # macOS (Apple Silicon)
+            ./network-view-osx-darwin-arm64
+            
+            # Linux x86_64
+            ./network-view-osx-linux-amd64
+            
+            # Linux ARM64
+            ./network-view-osx-linux-arm64
+            
+            # Windows x86_64
+            ./network-view-osx-windows-amd64.exe
+            
+            # Windows ARM64
+            ./network-view-osx-windows-arm64.exe
+            ```
+            
+            ## Verify Checksums
+            
+            ```bash
+            sha256sum -c sha256sums.txt
+            ```
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
