@@ -19,6 +19,45 @@
 
   let filteredRows = [];
 
+  /**
+   * Decode escaped service names
+   * Handles multiple encoding types:
+   * - URL encoding: %20, %3A, etc.
+   * - HTML entities: &#32;, &#160;, etc.
+   * - Unicode escapes: \u0020, etc.
+   */
+  function decodeServiceName(name) {
+    if (!name || typeof name !== 'string') return name;
+    
+    // First, decode URL-encoded characters (%XX)
+    let decoded = decodeURIComponent(name);
+    
+    // Then, decode HTML entities (&#DEC; or &#xHEX;)
+    decoded = decoded.replace(/&#(\d+);/g, (match, code) => {
+      return String.fromCharCode(parseInt(code, 10));
+    });
+    
+    decoded = decoded.replace(/&#x([0-9a-fA-F]+);/g, (match, code) => {
+      return String.fromCharCode(parseInt(code, 16));
+    });
+    
+    // Handle common HTML entity names
+    const entities = {
+      '&nbsp;': ' ',
+      '&quot;': '"',
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&apos;': "'"
+    };
+    
+    for (const [entity, char] of Object.entries(entities)) {
+      decoded = decoded.replace(new RegExp(entity, 'g'), char);
+    }
+    
+    return decoded;
+  }
+
   async function fetchInterfaces() {
     loadingInterfaces = true;
     try {
@@ -103,15 +142,19 @@
           const existingIndex = services.findIndex(s => `${s.ip}:${s.port}:${s.type}` === id);
           
           if (existingIndex === -1) {
+            // Decode service names to handle escaped characters
+            const decodedName = decodeServiceName(service.name);
+            const decodedHost = decodeServiceName(service.host);
+            
             services = [...services, {
               id,
-              name: service.name,
+              name: decodedName,
               type: service.type,
-              host: service.host,
+              host: decodedHost,
               ip: service.ip,
               port: service.port.toString()
             }];
-            console.log('➕ Added service:', service.name);
+            console.log('➕ Added service:', decodedName, '(raw:', service.name, ')');
           }
         }
       } catch (e) {
