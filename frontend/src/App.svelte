@@ -35,7 +35,7 @@
       eventSource.close();
     }
 
-    eventSource = new EventSource('http://localhost:9999/discover');
+    eventSource = new EventSource('http://192.168.98.140:9999/discover');
 
     eventSource.onopen = () => {
       connected = true;
