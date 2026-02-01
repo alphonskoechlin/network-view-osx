@@ -375,11 +375,39 @@ func main() {
 	// API endpoint for discovery
 	mux.HandleFunc("/discover", server.Discover)
 
-	// Serve frontend files
+	// Serve frontend files with SPA support
 	distPath := filepath.Join("..", "frontend", "dist")
 	if info, err := os.Stat(distPath); err == nil && info.IsDir() {
-		fs := http.FileServer(http.Dir(distPath))
-		mux.Handle("/", fs)
+		// Create custom handler for SPA - serve index.html for root and missing files
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			// API routes should be handled by their specific handlers
+			if strings.HasPrefix(r.URL.Path, "/api") || strings.HasPrefix(r.URL.Path, "/discover") || strings.HasPrefix(r.URL.Path, "/health") {
+				http.NotFound(w, r)
+				return
+			}
+			
+			// Try to serve the requested file
+			fullPath := filepath.Join(distPath, filepath.Clean(r.URL.Path))
+			
+			// Security: prevent directory traversal
+			if !strings.HasPrefix(fullPath, distPath) {
+				http.NotFound(w, r)
+				return
+			}
+			
+			// Check if file exists
+			if _, err := os.Stat(fullPath); err == nil {
+				// File exists, serve it
+				http.ServeFile(w, r, fullPath)
+			} else if r.URL.Path == "/" {
+				// Root path, serve index.html
+				http.ServeFile(w, r, filepath.Join(distPath, "index.html"))
+			} else {
+				// File doesn't exist, serve index.html (for SPA routing)
+				w.Header().Set("Content-Type", "text/html")
+				http.ServeFile(w, r, filepath.Join(distPath, "index.html"))
+			}
+		})
 		log.Printf("Serving frontend from %s", distPath)
 	}
 
