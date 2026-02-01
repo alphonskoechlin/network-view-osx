@@ -470,6 +470,21 @@ func getNetworkInterfaces() ([]map[string]string, error) {
 	return result, nil
 }
 
+func restartMDNSDiscovery(server *MDNSServer) {
+	log.Printf("🔄 Restarting mDNS discovery...")
+	
+	// Clear the seen services to force re-discovery
+	server.mu.Lock()
+	server.seen = make(map[string]bool)
+	currentIface := server.currentIface
+	server.mu.Unlock()
+	
+	// Restart discovery on current interface
+	startMDNSDiscovery(server, currentIface)
+	
+	log.Printf("✅ mDNS discovery restarted")
+}
+
 func main() {
 	port := flag.String("port", "9999", "Port to listen on")
 	bindAddr := flag.String("bind", "", "IP address to bind to (default: all interfaces)")
@@ -560,6 +575,28 @@ func main() {
 		server.mu.Unlock()
 
 		fmt.Fprintf(w, `{"status":"ok","interface":"%s"}`, ifaceName)
+	})
+
+	// API endpoint for restarting mDNS discovery
+	mux.HandleFunc("/api/restart", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Restart discovery in a goroutine to avoid blocking the response
+		go restartMDNSDiscovery(server)
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"status":"ok","message":"mDNS discovery restarted"}`)
 	})
 
 	// API endpoint for discovery

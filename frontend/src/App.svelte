@@ -13,6 +13,9 @@
   let selectedInterface = 'en5';
   let currentInterface = 'en5';
   let loadingInterfaces = false;
+  let restartLoading = false;
+  let restartSuccess = false;
+  let showRestartConfirm = false;
 
   let filteredRows = [];
 
@@ -144,6 +147,56 @@
     filteredRows = [];
   }
 
+  async function restartMDNS() {
+    restartLoading = true;
+    restartSuccess = false;
+    error = null;
+
+    try {
+      const response = await fetch('http://192.168.98.140:9999/api/restart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        restartSuccess = true;
+        console.log('✅ mDNS discovery restarted:', data.message);
+        
+        // Clear services and reconnect
+        clearServices();
+        
+        // Wait a moment for backend to restart, then reconnect
+        setTimeout(() => {
+          connectToMDNS();
+          showRestartConfirm = false;
+        }, 500);
+
+        // Hide success message after 3 seconds
+        setTimeout(() => {
+          restartSuccess = false;
+        }, 3000);
+      } else {
+        error = data.error || 'Failed to restart mDNS discovery';
+        console.error('Error:', error);
+      }
+    } catch (e) {
+      error = 'Error restarting mDNS: ' + e.message;
+      console.error('Error:', e);
+    } finally {
+      restartLoading = false;
+    }
+  }
+
+  function confirmRestart() {
+    showRestartConfirm = true;
+  }
+
+  function cancelRestart() {
+    showRestartConfirm = false;
+  }
+
   onMount(() => {
     fetchInterfaces();
     connectToMDNS();
@@ -177,12 +230,44 @@
           </select>
           <span class="current-iface">{currentInterface}</span>
         </div>
+        <button 
+          class="restart-button" 
+          on:click={confirmRestart}
+          disabled={restartLoading}
+          title="Restart mDNS discovery to find new services"
+        >
+          {#if restartLoading}
+            ⟳ Restarting...
+          {:else}
+            ⟳ Restart mDNS
+          {/if}
+        </button>
         <div class="connection-status" class:connected>
           <span class="status-dot"></span>
           {connected ? 'Connected' : 'Disconnected'}
         </div>
       </div>
     </div>
+
+    {#if showRestartConfirm}
+      <div class="restart-confirm">
+        <p>Restart mDNS discovery on the network?</p>
+        <div class="confirm-buttons">
+          <button class="btn-confirm" on:click={restartMDNS} disabled={restartLoading}>
+            {restartLoading ? 'Restarting...' : 'Yes, Restart'}
+          </button>
+          <button class="btn-cancel" on:click={cancelRestart} disabled={restartLoading}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    {/if}
+
+    {#if restartSuccess}
+      <div class="restart-success">
+        ✅ mDNS discovery restarted successfully
+      </div>
+    {/if}
   </header>
 
   <main class="app-main">
@@ -349,6 +434,99 @@
 
   .connection-status.connected .status-dot {
     background-color: #4caf50;
+  }
+
+  .restart-button {
+    padding: 8px 16px;
+    background-color: #ff9800;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 14px;
+    transition: background-color 0.2s;
+  }
+
+  .restart-button:hover:not(:disabled) {
+    background-color: #f57c00;
+  }
+
+  .restart-button:disabled {
+    background-color: #ffb74d;
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+
+  .restart-confirm {
+    background-color: #fff3e0;
+    border: 1px solid #ff9800;
+    border-top: none;
+    padding: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .restart-confirm p {
+    margin: 0;
+    font-weight: 500;
+    color: #e65100;
+  }
+
+  .confirm-buttons {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .btn-confirm {
+    padding: 6px 12px;
+    background-color: #ff9800;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 14px;
+  }
+
+  .btn-confirm:hover:not(:disabled) {
+    background-color: #f57c00;
+  }
+
+  .btn-confirm:disabled {
+    background-color: #ffb74d;
+    cursor: not-allowed;
+  }
+
+  .btn-cancel {
+    padding: 6px 12px;
+    background-color: #ccc;
+    color: #333;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 14px;
+  }
+
+  .btn-cancel:hover:not(:disabled) {
+    background-color: #bbb;
+  }
+
+  .btn-cancel:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .restart-success {
+    background-color: #e8f5e9;
+    border: 1px solid #4caf50;
+    border-top: none;
+    padding: 1rem;
+    color: #2e7d32;
+    font-weight: 500;
+    text-align: center;
   }
 
   .app-main {
