@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -92,14 +93,14 @@ func testMulticastSocket(t *testing.T) {
 	t.Logf("✓ Multicast socket created successfully on 224.0.0.251:5353")
 }
 
-// runMDNSDiscoveryTest performs mDNS queries and waits for responses
+// runMDNSDiscoveryTest performs mDNS listening and discovery
 func runMDNSDiscoveryTest(t *testing.T) []*MDNSService {
 	discovered := make([]*MDNSService, 0)
 	seenKeys := make(map[string]bool)
+	mu := &sync.Mutex{}
 
 	// Standard mDNS service types to query
 	serviceTypes := []string{
-		"_services._dns-sd._udp.local.",  // Service discovery query
 		"_http._tcp.local.",
 		"_https._tcp.local.",
 		"_ssh._tcp.local.",
@@ -115,77 +116,146 @@ func runMDNSDiscoveryTest(t *testing.T) []*MDNSService {
 
 	// Set timeout for overall discovery (30 seconds)
 	deadline := time.Now().Add(30 * time.Second)
-	queryTicker := time.NewTicker(1 * time.Second)
-	defer queryTicker.Stop()
 
 	t.Logf("Starting mDNS discovery on en5 (30-second timeout)...")
-	t.Logf("Querying %d service types...", len(serviceTypes))
+	t.Logf("Listening for %d service types...", len(serviceTypes))
 
-	queryCount := 0
-	for {
-		if time.Now().After(deadline) {
-			t.Logf("Discovery timeout reached (30 seconds)")
-			break
+	// Start multicast listener to capture responses
+	go listenAndProcessMDNSResponses(t, deadline, &discovered, seenKeys, mu)
+
+	// Send queries periodically to trigger responses
+	go sendMDNSQueries(t, deadline, serviceTypes)
+
+	// Wait until deadline
+	<-time.After(time.Until(deadline))
+
+	t.Logf("Discovery completed")
+	return discovered
+}
+
+// listenAndProcessMDNSResponses listens to mDNS multicast and extracts service info
+func listenAndProcessMDNSResponses(t *testing.T, deadline time.Time, discovered *[]*MDNSService, seenKeys map[string]bool, mu *sync.Mutex) {
+	addr, err := net.ResolveUDPAddr("udp", "224.0.0.251:5353")
+	if err != nil {
+		t.Logf("⚠️  Failed to resolve mDNS address: %v", err)
+		return
+	}
+
+	conn, err := net.ListenMulticastUDP("udp", nil, addr)
+	if err != nil {
+		t.Logf("⚠️  Failed to listen on mDNS multicast: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	t.Logf("✓ Listening to mDNS multicast 224.0.0.251:5353")
+
+	buffer := make([]byte, 4096)
+	for time.Now().Before(deadline) {
+		// Set read deadline for this packet
+		conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+
+		n, _, err := conn.ReadFromUDP(buffer)
+		if err != nil {
+			// Timeout is expected, continue listening
+			continue
 		}
 
-		// Send queries for all service types
-		for _, serviceType := range serviceTypes {
-			queryCount++
-			t.Logf("[Query #%d] Querying %s...", queryCount, serviceType)
+		// Parse DNS message
+		msg := new(dns.Msg)
+		err = msg.Unpack(buffer[:n])
+		if err != nil {
+			continue
+		}
 
-			m := new(dns.Msg)
-			m.SetQuestion(serviceType, dns.TypePTR)
-			m.RecursionDesired = false
+		// Process all answer records
+		for _, ans := range msg.Answer {
+			switch record := ans.(type) {
+			case *dns.PTR:
+				// PTR record: service type -> service instance
+				serviceName := record.Ptr
+				serviceType := record.Hdr.Name
 
-			c := new(dns.Client)
-			c.Net = "udp"
-			c.Timeout = 1 * time.Second
+				t.Logf("  ✓ Found PTR: %s -> %s", serviceType, serviceName)
 
-			// Query mDNS multicast address
-			in, _, err := c.Exchange(m, "224.0.0.251:5353")
-			if err != nil {
-				t.Logf("  ✗ Query failed: %v", err)
-				continue
-			}
+				// Query SRV record for this service
+				srvService := queryServiceDetailsForTest(t, serviceName, serviceType)
+				if srvService != nil {
+					mu.Lock()
+					key := fmt.Sprintf("%s:%s:%d", srvService.IP, serviceType, srvService.Port)
+					if !seenKeys[key] {
+						seenKeys[key] = true
+						*discovered = append(*discovered, srvService)
+						t.Logf("    ✓ Added: %s at %s:%d", srvService.Name, srvService.IP, srvService.Port)
+					}
+					mu.Unlock()
+				}
 
-			if in == nil {
-				t.Logf("  ⚠️  No response received")
-				continue
-			}
+			case *dns.SRV:
+				// SRV record: service instance -> host and port
+				parts := strings.Split(record.Hdr.Name, ".")
+				if len(parts) >= 2 {
+					serviceName := parts[0]
+					serviceType := record.Hdr.Name
+					hostname := strings.TrimSuffix(record.Target, ".")
 
-			// Process PTR answers
-			for _, ans := range in.Answer {
-				if ptr, ok := ans.(*dns.PTR); ok {
-					t.Logf("  ✓ Found service: %s -> %s", serviceType, ptr.Ptr)
-
-					// Query SRV record for service details
-					srvService := queryServiceDetailsForTest(t, ptr.Ptr, serviceType)
-					if srvService != nil {
-						// Create unique key
-						key := fmt.Sprintf("%s:%s:%d", srvService.IP, serviceType, srvService.Port)
+					// Resolve hostname to IP
+					ip := resolveHostIPForTest(t, hostname)
+					if ip != "" {
+						mu.Lock()
+						key := fmt.Sprintf("%s:%s:%d", ip, serviceType, record.Port)
 						if !seenKeys[key] {
 							seenKeys[key] = true
-							discovered = append(discovered, srvService)
-							t.Logf("    ✓ Added to discovered: %s (%s)", srvService.Name, srvService.IP)
+							service := &MDNSService{
+								Name:      serviceName,
+								Type:      serviceType,
+								Host:      hostname,
+								IP:        ip,
+								Port:      uint16(record.Port),
+								Timestamp: time.Now().Unix(),
+							}
+							*discovered = append(*discovered, service)
+							t.Logf("    ✓ Added from SRV: %s at %s:%d", serviceName, ip, record.Port)
 						}
+						mu.Unlock()
 					}
 				}
 			}
 		}
+	}
+}
 
-		// Wait a bit before next query round
+// sendMDNSQueries sends periodic mDNS queries to trigger responses
+func sendMDNSQueries(t *testing.T, deadline time.Time, serviceTypes []string) {
+	queryTicker := time.NewTicker(2 * time.Second)
+	defer queryTicker.Stop()
+
+	queryCount := 0
+	for {
 		select {
 		case <-queryTicker.C:
-			// Continue to next iteration
-		}
+			if time.Now().After(deadline) {
+				return
+			}
 
-		// Early exit if we found services and it's been a few seconds
-		if len(discovered) > 0 && time.Now().After(time.Now().Add(-5*time.Second)) {
-			t.Logf("Found %d services, continuing to wait for more (up to 30 seconds total)...", len(discovered))
+			for _, serviceType := range serviceTypes {
+				queryCount++
+				t.Logf("[Query #%d] Querying %s...", queryCount, serviceType)
+
+				m := new(dns.Msg)
+				m.SetQuestion(serviceType, dns.TypePTR)
+				m.RecursionDesired = false
+
+				c := new(dns.Client)
+				c.Net = "udp"
+				c.Timeout = 500 * time.Millisecond
+
+				// Send to mDNS multicast
+				_, _, _ = c.Exchange(m, "224.0.0.251:5353")
+				// Ignore errors - multicast queries often timeout
+			}
 		}
 	}
-
-	return discovered
 }
 
 // queryServiceDetailsForTest performs SRV lookup for a service
