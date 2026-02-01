@@ -1,4 +1,4 @@
-.PHONY: build test clean run dev help install-deps buf-gen
+.PHONY: build backend frontend test clean run dev help install-deps buf-gen
 
 BACKEND_DIR := backend
 FRONTEND_DIR := frontend
@@ -37,7 +37,7 @@ backend:
 frontend:
 	cd $(FRONTEND_DIR) && npm run build
 
-build: backend frontend
+build: backend
 	@echo "✓ Build complete"
 
 test:

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -169,7 +169,7 @@ func queryServiceDetails(server *MDNSServer, serviceName string, serviceType str
 
 	for _, srvAns := range srvIn.Answer {
 		if srv, ok := srvAns.(*dns.SRV); ok {
-			queryHostIP(server, srv.Target.String(), serviceName, serviceType, srv.Port)
+			queryHostIP(server, srv.Target, serviceName, serviceType, srv.Port)
 		}
 	}
 }
@@ -250,6 +250,9 @@ func resolveHostIP(hostname string) string {
 }
 
 func main() {
+	port := flag.String("port", "8080", "Port to listen on")
+	flag.Parse()
+
 	server := NewMDNSServer()
 	startMDNSDiscovery(server)
 
@@ -277,8 +280,9 @@ func main() {
 		})
 	}
 
-	log.Println("Starting mDNS discovery server on :8080")
-	if err := http.ListenAndServe(":8080", corsHandler(mux)); err != nil {
+	addr := ":" + *port
+	log.Printf("Starting mDNS discovery server on %s", addr)
+	if err := http.ListenAndServe(addr, corsHandler(mux)); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}
 }
