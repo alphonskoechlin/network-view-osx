@@ -7,6 +7,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -83,6 +85,10 @@ func (s *MDNSServer) Discover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Explicitly write status line and headers to the client
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+	
 	for {
 		select {
 		case <-r.Context().Done():
@@ -251,6 +257,7 @@ func resolveHostIP(hostname string) string {
 
 func main() {
 	port := flag.String("port", "9999", "Port to listen on")
+	bindAddr := flag.String("bind", "", "IP address to bind to (default: all interfaces)")
 	flag.Parse()
 
 	server := NewMDNSServer()
@@ -264,8 +271,16 @@ func main() {
 		fmt.Fprintf(w, `{"status":"ok"}`)
 	})
 
-	// CORS middleware
+	// API endpoint for discovery
 	mux.HandleFunc("/discover", server.Discover)
+
+	// Serve frontend files
+	distPath := filepath.Join("..", "frontend", "dist")
+	if info, err := os.Stat(distPath); err == nil && info.IsDir() {
+		fs := http.FileServer(http.Dir(distPath))
+		mux.Handle("/", fs)
+		log.Printf("Serving frontend from %s", distPath)
+	}
 
 	corsHandler := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -280,9 +295,15 @@ func main() {
 		})
 	}
 
-	addr := ":" + *port
-	log.Printf("Starting mDNS discovery server on %s", addr)
-	if err := http.ListenAndServe(addr, corsHandler(mux)); err != nil {
+	var listenAddr string
+	if *bindAddr != "" {
+		listenAddr = *bindAddr + ":" + *port
+	} else {
+		listenAddr = ":" + *port
+	}
+
+	log.Printf("Starting mDNS discovery server on %s", listenAddr)
+	if err := http.ListenAndServe(listenAddr, corsHandler(mux)); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}
 }

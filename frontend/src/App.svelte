@@ -35,15 +35,19 @@
       eventSource.close();
     }
 
-    eventSource = new EventSource('http://192.168.98.140:9999/discover');
+    const url = 'http://192.168.98.140:9999/discover';
+    console.log('Connecting to EventSource:', url);
+    
+    eventSource = new EventSource(url);
 
     eventSource.onopen = () => {
       connected = true;
       loading = false;
-      console.log('Connected to mDNS stream');
+      console.log('✅ Connected to mDNS stream (readyState:', eventSource.readyState, ')');
     };
 
     eventSource.onmessage = (event) => {
+      console.log('📨 Received message:', event.data);
       try {
         const data = JSON.parse(event.data);
         if (data.service && !data.removed) {
@@ -60,6 +64,7 @@
               ip: service.ip,
               port: service.port.toString()
             }];
+            console.log('➕ Added service:', service.name);
           }
         }
       } catch (e) {
@@ -68,11 +73,19 @@
     };
 
     eventSource.onerror = (err) => {
-      console.error('EventSource error:', err);
-      connected = false;
-      loading = false;
+      console.error('❌ EventSource error:', err);
+      console.log('Current readyState:', eventSource?.readyState, '(0=CONNECTING, 1=OPEN, 2=CLOSED)');
+      
+      // Don't update connected/loading on transient errors
       if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+        connected = false;
+        loading = false;
         error = 'Connection to mDNS service lost. Make sure backend is running on :9999';
+        console.error('Connection closed:', error);
+      } else if (eventSource && eventSource.readyState === EventSource.CONNECTING) {
+        console.warn('EventSource is still trying to connect...');
+      } else if (eventSource && eventSource.readyState === EventSource.OPEN) {
+        console.warn('Got error but connection still open, ignoring');
       }
     };
   }
