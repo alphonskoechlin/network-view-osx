@@ -27,7 +27,7 @@
 ```bash
 cd backend
 go run main.go
-# Server starts on http://localhost:8080
+# Server starts on http://localhost:9999
 ```
 
 ### Terminal 2: Frontend
@@ -115,7 +115,7 @@ Server-Sent Events stream for mDNS discovery.
 ## Troubleshooting
 
 ### Backend won't start
-- Make sure port 8080 is available
+- Make sure port 9999 is available
 - Check network permissions for mDNS (224.0.0.251:5353)
 - Some networks block mDNS multicast
 
@@ -125,9 +125,9 @@ Server-Sent Events stream for mDNS discovery.
 - Try with common services like SSH, HTTP, SMB
 
 ### Frontend can't connect to backend
-- Make sure backend is running on :8080
+- Make sure backend is running on :9999
 - Check CORS headers are being sent
-- Try `curl http://localhost:8080/health`
+- Try `curl http://localhost:9999/health`
 
 ## Adding New Service Types
 

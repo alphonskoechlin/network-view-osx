@@ -89,7 +89,7 @@ If not using the Makefile:
    ```bash
    go run main.go
    ```
-   The server will start on `http://localhost:8080`
+   The server will start on `http://localhost:9999`
 
 ### Frontend (Manual)
 
@@ -164,7 +164,7 @@ make backend
 # Build frontend only
 make frontend
 
-# Run backend (development)
+# Run backend (development) - starts on :9999
 make run
 
 # Start full dev mode (backend + frontend, auto-runs install-deps & buf-gen)
@@ -189,7 +189,7 @@ Build and run in a container:
 docker build -t network-view-osx .
 
 # Run container
-docker run -p 8080:8080 network-view-osx
+docker run -p 9999:9999 network-view-osx
 ```
 
 ### Cross-Platform Binaries

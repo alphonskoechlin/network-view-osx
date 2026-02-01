@@ -35,7 +35,7 @@
       eventSource.close();
     }
 
-    eventSource = new EventSource('http://localhost:8080/discover');
+    eventSource = new EventSource('http://localhost:9999/discover');
 
     eventSource.onopen = () => {
       connected = true;
@@ -72,7 +72,7 @@
       connected = false;
       loading = false;
       if (eventSource && eventSource.readyState === EventSource.CLOSED) {
-        error = 'Connection to mDNS service lost. Make sure backend is running on :8080';
+        error = 'Connection to mDNS service lost. Make sure backend is running on :9999';
       }
     };
   }

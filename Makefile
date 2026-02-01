@@ -53,7 +53,7 @@ run: backend
 
 dev: install-deps buf-gen
 	@echo "Starting development mode..."
-	@echo "Backend will run on http://localhost:8080"
+	@echo "Backend will run on http://localhost:9999"
 	@echo "Frontend will run on http://localhost:5173"
 	@echo ""
 	@(cd $(BACKEND_DIR) && go run main.go) & \

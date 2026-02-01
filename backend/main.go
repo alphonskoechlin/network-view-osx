@@ -250,7 +250,7 @@ func resolveHostIP(hostname string) string {
 }
 
 func main() {
-	port := flag.String("port", "8080", "Port to listen on")
+	port := flag.String("port", "9999", "Port to listen on")
 	flag.Parse()
 
 	server := NewMDNSServer()
