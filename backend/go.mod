@@ -1,8 +1,12 @@
 module github.com/alphonskoechlin/network-view-osx
 
-go 1.21
+go 1.24.0
 
-require github.com/miekg/dns v1.1.57
+require (
+	connectrpc.com/connect v1.19.1
+	github.com/miekg/dns v1.1.57
+	google.golang.org/protobuf v1.36.11
+)
 
 require (
 	golang.org/x/mod v0.12.0 // indirect

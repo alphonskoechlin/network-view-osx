@@ -37,7 +37,7 @@ backend:
 frontend:
 	cd $(FRONTEND_DIR) && npm run build
 
-build: backend
+build: backend frontend
 	@echo "✓ Build complete"
 
 test:

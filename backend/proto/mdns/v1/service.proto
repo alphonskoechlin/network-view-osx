@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package mdns.v1;
 
-option go_package = "github.com/alphonskoechlin/network-view-osx/gen/mdns/v1";
+option go_package = "github.com/alphonskoechlin/network-view-osx/gen/proto/mdns/v1";
 
 message MDNSService {
   string name = 1;
