@@ -31,15 +31,17 @@ type DiscoveryResponse struct {
 }
 
 type MDNSServer struct {
-	clients map[chan *DiscoveryResponse]bool
-	mu      sync.RWMutex
-	seen    map[string]bool
+	clients      map[chan *DiscoveryResponse]bool
+	mu           sync.RWMutex
+	seen         map[string]bool
+	currentIface string
 }
 
 func NewMDNSServer() *MDNSServer {
 	return &MDNSServer{
-		clients: make(map[chan *DiscoveryResponse]bool),
-		seen:    make(map[string]bool),
+		clients:      make(map[chan *DiscoveryResponse]bool),
+		seen:         make(map[string]bool),
+		currentIface: "en5",
 	}
 }
 
@@ -103,7 +105,11 @@ func (s *MDNSServer) Discover(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func startMDNSDiscovery(server *MDNSServer) {
+func startMDNSDiscovery(server *MDNSServer, iface string) {
+	server.mu.Lock()
+	server.currentIface = iface
+	server.mu.Unlock()
+
 	go func() {
 		serviceTypes := []string{
 			"_http._tcp.local.",
@@ -255,13 +261,33 @@ func resolveHostIP(hostname string) string {
 	return ""
 }
 
+func getNetworkInterfaces() ([]map[string]string, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+
+	var result []map[string]string
+	for _, iface := range interfaces {
+		// Only include up interfaces with addresses
+		if iface.Flags&net.FlagUp != 0 {
+			result = append(result, map[string]string{
+				"name": iface.Name,
+				"mtu":  fmt.Sprintf("%d", iface.MTU),
+			})
+		}
+	}
+	return result, nil
+}
+
 func main() {
 	port := flag.String("port", "9999", "Port to listen on")
 	bindAddr := flag.String("bind", "", "IP address to bind to (default: all interfaces)")
+	iface := flag.String("iface", "en5", "Network interface for mDNS discovery (default: en5)")
 	flag.Parse()
 
 	server := NewMDNSServer()
-	startMDNSDiscovery(server)
+	startMDNSDiscovery(server, *iface)
 
 	mux := http.NewServeMux()
 
@@ -269,6 +295,81 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok"}`)
+	})
+
+	// API endpoint for getting available network interfaces
+	mux.HandleFunc("/api/interfaces", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		interfaces, err := getNetworkInterfaces()
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
+			return
+		}
+
+		response := map[string]interface{}{
+			"interfaces": interfaces,
+			"current":    server.currentIface,
+		}
+		data, _ := json.Marshal(response)
+		fmt.Fprint(w, string(data))
+	})
+
+	// API endpoint for setting network interface
+	mux.HandleFunc("/api/interfaces/set", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusBadRequest)
+			return
+		}
+
+		ifaceName, ok := req["interface"]
+		if !ok || ifaceName == "" {
+			http.Error(w, `{"error":"interface name required"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Verify interface exists
+		ifaces, _ := getNetworkInterfaces()
+		found := false
+		for _, iface := range ifaces {
+			if iface["name"] == ifaceName {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			http.Error(w, fmt.Sprintf(`{"error":"interface %s not found"}`, ifaceName), http.StatusNotFound)
+			return
+		}
+
+		// Update current interface and restart discovery
+		server.mu.Lock()
+		server.currentIface = ifaceName
+		server.seen = make(map[string]bool) // Reset seen services
+		server.mu.Unlock()
+
+		fmt.Fprintf(w, `{"status":"ok","interface":"%s"}`, ifaceName)
 	})
 
 	// API endpoint for discovery

@@ -9,8 +9,52 @@
   let eventSource = null;
   let pageSize = 10;
   let currentPage = 0;
+  let interfaces = [];
+  let selectedInterface = 'en5';
+  let currentInterface = 'en5';
+  let loadingInterfaces = false;
 
   let filteredRows = [];
+
+  async function fetchInterfaces() {
+    loadingInterfaces = true;
+    try {
+      const response = await fetch('http://192.168.98.140:9999/api/interfaces');
+      const data = await response.json();
+      interfaces = data.interfaces || [];
+      currentInterface = data.current || 'en5';
+      selectedInterface = currentInterface;
+    } catch (e) {
+      console.error('Error fetching interfaces:', e);
+    } finally {
+      loadingInterfaces = false;
+    }
+  }
+
+  async function setInterface(ifaceName) {
+    try {
+      const response = await fetch('http://192.168.98.140:9999/api/interfaces/set', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interface: ifaceName })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        currentInterface = ifaceName;
+        selectedInterface = ifaceName;
+        console.log('✅ Interface changed to:', ifaceName);
+        // Clear services and reconnect to restart discovery
+        clearServices();
+        connectToMDNS();
+      } else {
+        error = data.error || 'Failed to change interface';
+        console.error('Error:', error);
+      }
+    } catch (e) {
+      error = 'Error changing interface: ' + e.message;
+      console.error('Error:', e);
+    }
+  }
 
   $: {
     let filtered = services;
@@ -101,6 +145,7 @@
   }
 
   onMount(() => {
+    fetchInterfaces();
     connectToMDNS();
 
     return () => {
@@ -115,9 +160,27 @@
   <header class="app-header">
     <div class="header-content">
       <h1>Network View macOS</h1>
-      <div class="connection-status" class:connected>
-        <span class="status-dot"></span>
-        {connected ? 'Connected' : 'Disconnected'}
+      <div class="header-right">
+        <div class="interface-selector">
+          <label for="iface-select">Interface:</label>
+          <select 
+            id="iface-select" 
+            bind:value={selectedInterface}
+            on:change={(e) => setInterface(e.target.value)}
+            disabled={loadingInterfaces}
+          >
+            {#each interfaces as iface}
+              <option value={iface.name}>
+                {iface.name}
+              </option>
+            {/each}
+          </select>
+          <span class="current-iface">{currentInterface}</span>
+        </div>
+        <div class="connection-status" class:connected>
+          <span class="status-dot"></span>
+          {connected ? 'Connected' : 'Disconnected'}
+        </div>
       </div>
     </div>
   </header>
@@ -217,6 +280,48 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 1rem;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .interface-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background-color: #f5f5f5;
+    border-radius: 4px;
+  }
+
+  .interface-selector label {
+    font-size: 14px;
+    font-weight: 500;
+    color: #666;
+  }
+
+  .interface-selector select {
+    padding: 6px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    background-color: white;
+    cursor: pointer;
+  }
+
+  .interface-selector select:disabled {
+    background-color: #e0e0e0;
+    cursor: not-allowed;
+  }
+
+  .current-iface {
+    font-size: 13px;
+    color: #999;
+    font-weight: 500;
   }
 
   .connection-status {
