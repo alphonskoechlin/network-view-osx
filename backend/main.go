@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/mdns"
 	"github.com/miekg/dns"
 )
 
@@ -110,6 +111,13 @@ func startMDNSDiscovery(server *MDNSServer, iface string) {
 	server.currentIface = iface
 	server.mu.Unlock()
 
+	// Start proper mDNS browser using hashicorp/mdns library
+	go browseMDNSServices(server, iface)
+
+	// Also start mDNS listener to capture multicast responses
+	go listenMDNSMulticast(server)
+
+	// And periodic queries to trigger responses
 	go func() {
 		serviceTypes := []string{
 			"_http._tcp.local.",
@@ -120,8 +128,6 @@ func startMDNSDiscovery(server *MDNSServer, iface string) {
 			"_afpovertcp._tcp.local.",
 			"_nfs._tcp.local.",
 			"_ldap._tcp.local.",
-			"_sip._tcp.local.",
-			"_xmpp._tcp.local.",
 		}
 
 		ticker := time.NewTicker(5 * time.Second)
@@ -135,17 +141,201 @@ func startMDNSDiscovery(server *MDNSServer, iface string) {
 	}()
 }
 
+func browseMDNSServices(server *MDNSServer, iface string) {
+	// Service types to browse
+	serviceTypes := []string{
+		"_http._tcp",
+		"_https._tcp",
+		"_ssh._tcp",
+		"_sftp._tcp",
+		"_smb._tcp",
+		"_afpovertcp._tcp",
+		"_nfs._tcp",
+		"_ldap._tcp",
+		"_sip._tcp",
+		"_xmpp._tcp",
+		"_workstation._tcp",
+		"_device-info._tcp",
+	}
+
+	// Browse each service type
+	for _, serviceType := range serviceTypes {
+		go browseServiceType(server, serviceType)
+	}
+}
+
+func browseServiceType(server *MDNSServer, serviceType string) {
+	// Set up periodic browsing with a timeout
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		// Create an mDNS query with a timeout
+		entriesChan := make(chan *mdns.ServiceEntry, 4)
+		
+		go func() {
+			for entry := range entriesChan {
+				if entry == nil {
+					continue
+				}
+
+				// Extract service info
+				serviceName := entry.Name
+				if serviceName == "" {
+					serviceName = entry.Host
+				}
+
+				// Get IP address - use AddrV4 or AddrV6
+				var ip string
+				if entry.AddrV4 != nil {
+					ip = entry.AddrV4.String()
+				} else if entry.AddrV6 != nil {
+					ip = entry.AddrV6.String()
+				}
+
+				if ip == "" {
+					continue
+				}
+
+				// Create unique key
+				key := fmt.Sprintf("%s:%s:%d", ip, serviceType, entry.Port)
+
+				server.mu.Lock()
+				seen := server.seen[key]
+				server.mu.Unlock()
+
+				if !seen {
+					server.mu.Lock()
+					server.seen[key] = true
+					server.mu.Unlock()
+
+					// Broadcast the discovered service
+					service := &MDNSService{
+						Name:      serviceName,
+						Type:      "_" + serviceType + ".local.",
+						Host:      entry.Host,
+						IP:        ip,
+						Port:      uint16(entry.Port),
+						Timestamp: time.Now().Unix(),
+					}
+
+					server.broadcast(&DiscoveryResponse{
+						Service: *service,
+						Removed: false,
+					})
+
+					log.Printf("Discovered service: %s (%s) at %s:%d", serviceName, serviceType, ip, entry.Port)
+				}
+			}
+		}()
+
+		// Browser lookup with 3 second timeout
+		mdns.Lookup(serviceType, entriesChan)
+		close(entriesChan)
+	}
+}
+
+func listenMDNSMulticast(server *MDNSServer) {
+	// Listen to mDNS multicast traffic on 224.0.0.251:5353
+	addr, err := net.ResolveUDPAddr("udp", "224.0.0.251:5353")
+	if err != nil {
+		log.Printf("Failed to resolve mDNS address: %v", err)
+		return
+	}
+
+	conn, err := net.ListenMulticastUDP("udp", nil, addr)
+	if err != nil {
+		log.Printf("Failed to listen on mDNS multicast: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	log.Printf("Listening to mDNS multicast traffic on 224.0.0.251:5353")
+
+	buffer := make([]byte, 4096)
+	for {
+		n, _, err := conn.ReadFromUDP(buffer)
+		if err != nil {
+			log.Printf("Error reading from mDNS: %v", err)
+			continue
+		}
+
+		// Parse DNS message
+		msg := new(dns.Msg)
+		err = msg.Unpack(buffer[:n])
+		if err != nil {
+			// Ignore invalid messages
+			continue
+		}
+
+		// Process answers in the message
+		// Note: mDNS can include answers even for unsolicited responses
+		for _, ans := range msg.Answer {
+			switch record := ans.(type) {
+			case *dns.PTR:
+				// PTR record points to service instances
+				queryServiceDetails(server, record.Ptr, record.Hdr.Name)
+			case *dns.SRV:
+				// SRV record has hostname and port
+				// Extract service name from record name
+				parts := strings.Split(record.Hdr.Name, ".")
+				if len(parts) >= 2 {
+					serviceType := record.Hdr.Name
+					ip := resolveHostIP(strings.TrimSuffix(record.Target, "."))
+					if ip != "" {
+						name := parts[0]
+						key := fmt.Sprintf("%s:%s:%d", ip, serviceType, record.Port)
+						
+						server.mu.Lock()
+						seen := server.seen[key]
+						server.mu.Unlock()
+						
+						if !seen {
+							server.mu.Lock()
+							server.seen[key] = true
+							server.mu.Unlock()
+							
+							service := &MDNSService{
+								Name:      name,
+								Type:      serviceType,
+								Host:      strings.TrimSuffix(record.Target, "."),
+								IP:        ip,
+								Port:      record.Port,
+								Timestamp: time.Now().Unix(),
+							}
+							
+							server.broadcast(&DiscoveryResponse{
+								Service: *service,
+								Removed: false,
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 func discoverService(server *MDNSServer, serviceType string) {
+	// Query using DNS protocol to mDNS multicast address
+	// Note: This uses standard DNS query mechanism which may have limitations
+	// on some networks. For a more robust approach, consider using a dedicated
+	// mDNS browser library.
+	
 	m := new(dns.Msg)
 	m.SetQuestion(serviceType, dns.TypePTR)
 	m.RecursionDesired = false
 
 	c := new(dns.Client)
 	c.Net = "udp"
-	c.Timeout = 1 * time.Second
+	c.Timeout = 500 * time.Millisecond // Reduce timeout for multicast
+	c.SingleInflight = false
 
+	// Send to mDNS multicast address
+	// Note: mDNS may not respond to unicast queries, only multicast listeners
 	in, _, err := c.Exchange(m, "224.0.0.251:5353")
 	if err != nil {
+		// Expected - multicast queries often timeout
 		return
 	}
 
