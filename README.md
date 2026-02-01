@@ -41,24 +41,48 @@ network-view-osx/
 
 ## Setup & Installation
 
-### Backend
+### Quick Start
+
+Install all dependencies at once:
+
+```bash
+make install-deps
+```
+
+This will:
+- Run `go mod download` and `go mod tidy` for the backend
+- Run `npm install` for the frontend
+
+### Generate Protobuf Code
+
+When updating proto definitions, generate the code:
+
+```bash
+make buf-gen
+```
+
+This runs `buf generate` to create Go code from `backend/proto/mdns/v1/service.proto`.
+
+### Backend (Manual)
+
+If not using the Makefile:
 
 1. Navigate to the backend directory:
    ```bash
    cd backend
    ```
 
-2. Generate protobuf code:
+2. Download dependencies:
+   ```bash
+   go mod download
+   ```
+
+3. Generate protobuf code (requires buf CLI):
    ```bash
    go install github.com/bufbuild/buf/cmd/buf@latest
    go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
    go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
    buf generate
-   ```
-
-3. Download dependencies:
-   ```bash
-   go mod download
    ```
 
 4. Run the server:
@@ -67,7 +91,9 @@ network-view-osx/
    ```
    The server will start on `http://localhost:8080`
 
-### Frontend
+### Frontend (Manual)
+
+If not using the Makefile:
 
 1. Navigate to the frontend directory:
    ```bash
@@ -123,6 +149,12 @@ network-view-osx/
 Use the Makefile for common tasks:
 
 ```bash
+# Install dependencies (backend + frontend)
+make install-deps
+
+# Generate protobuf code
+make buf-gen
+
 # Build both backend and frontend
 make build
 
@@ -135,7 +167,7 @@ make frontend
 # Run backend (development)
 make run
 
-# Start full dev mode (backend + frontend)
+# Start full dev mode (backend + frontend, auto-runs install-deps & buf-gen)
 make dev
 
 # Run tests
@@ -198,8 +230,12 @@ This triggers the CI/CD pipeline to build and release all platform binaries auto
 When updating `proto/mdns/v1/service.proto`:
 
 ```bash
-cd backend
-buf generate
+make buf-gen
+```
+
+Or manually:
+```bash
+cd backend && buf generate
 ```
 
 ## Testing
